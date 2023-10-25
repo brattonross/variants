@@ -1,6 +1,7 @@
 package variants
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 )
@@ -13,65 +14,97 @@ type Options[T comparable] struct {
 
 func New[T comparable](base string, options Options[T]) func(T) string {
 	return func(props T) string {
-		classNames := classList{base}
+		if any(props) == nil {
+			return base
+		}
+
+		classNames := []string{base}
 
 		p := reflect.ValueOf(props)
 		for variant, mapping := range options.Variants {
 			switch p.Kind() {
 			case reflect.Map:
-				if value, ok := p.MapIndex(reflect.ValueOf(variant)).Interface().(any); ok {
-					classNames.Add(mapping[value])
-				} else {
-					classNames.Add(mapping[options.DefaultVariants[variant]])
+				vv := reflect.ValueOf(variant)
+				if vv.IsValid() {
+					mv := p.MapIndex(vv)
+					if mv.IsValid() {
+						value, ok := mv.Interface().(any)
+						if ok {
+							classNames = append(classNames, mapping[value])
+							continue
+						}
+					}
 				}
+				classNames = append(classNames, mapping[options.DefaultVariants[variant]])
 			case reflect.Struct:
-				if value, ok := p.FieldByName(variant).Interface().(any); ok {
-					classNames.Add(mapping[value])
-				} else {
-					classNames.Add(mapping[options.DefaultVariants[variant]])
+				f := p.FieldByName(variant)
+				if f.IsValid() {
+					value, ok := f.Interface().(any)
+					if ok {
+						classNames = append(classNames, mapping[value])
+						continue
+					}
 				}
+				classNames = append(classNames, mapping[options.DefaultVariants[variant]])
 			default:
-				classNames.Add(mapping[options.DefaultVariants[variant]])
+				classNames = append(classNames, mapping[options.DefaultVariants[variant]])
 			}
 		}
 
 		for match, className := range options.CompoundVariants {
-			matchValue := reflect.ValueOf(match)
-			if matchValue.Kind() == reflect.Map {
-				if matchValue.Len() == 0 {
-					continue
-				}
-				for _, key := range matchValue.MapKeys() {
-					if matchValue.MapIndex(key).Interface() != p.MapIndex(key).Interface() {
-						continue
+			if any(match) == nil {
+				continue
+			}
+
+			mv := reflect.ValueOf(match)
+			if mv.IsValid() {
+				switch mv.Kind() {
+				case reflect.Map:
+					for _, key := range mv.MapKeys() {
+						if mv.MapIndex(key).Interface() != p.MapIndex(key).Interface() {
+							continue
+						}
+					}
+				case reflect.Struct:
+					for i := 0; i < mv.NumField(); i++ {
+						if mv.Field(i).Interface() != p.Field(i).Interface() {
+							continue
+						}
 					}
 				}
 			}
-
-			if matchValue.Kind() == reflect.Struct {
-				for i := 0; i < matchValue.NumField(); i++ {
-					if matchValue.Field(i).Interface() != p.Field(i).Interface() {
-						continue
-					}
-				}
-			}
-
-			classNames.Add(className)
+			classNames = append(classNames, className)
 		}
 
-		return classNames.String()
+		return Cx(classNames...)
 	}
 }
 
-type classList []string
-
-func (c classList) String() string {
-	return strings.TrimSpace(strings.Join(c, " "))
-}
-
-func (c *classList) Add(class string) {
-	if class == "" {
-		return
+func Cx[T any](classNames ...T) string {
+	values := []string{}
+	add := func(value string) {
+		if value != "" {
+			values = append(values, value)
+		}
 	}
-	*c = append(*c, class)
+
+	for _, c := range classNames {
+		switch v := any(c).(type) {
+		case string:
+			add(v)
+		case []string:
+			for _, s := range v {
+				add(s)
+			}
+		case []any:
+			for _, a := range v {
+				add(Cx(a))
+			}
+		case fmt.Stringer:
+			add(v.String())
+		default:
+			add(fmt.Sprintf("%v", v))
+		}
+	}
+	return strings.TrimSpace(strings.Join(values, " "))
 }
