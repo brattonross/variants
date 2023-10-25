@@ -20,35 +20,32 @@ func New[T comparable](base string, options Options[T]) func(T) string {
 
 		classNames := []string{base}
 
-		p := reflect.ValueOf(props)
+		pv := reflect.ValueOf(props)
+		kind := pv.Kind()
 		for variant, mapping := range options.Variants {
-			switch p.Kind() {
+			variantClass := mapping[options.DefaultVariants[variant]]
+			switch kind {
 			case reflect.Map:
 				vv := reflect.ValueOf(variant)
 				if vv.IsValid() {
-					mv := p.MapIndex(vv)
+					mv := pv.MapIndex(vv)
 					if mv.IsValid() {
 						value, ok := mv.Interface().(any)
 						if ok {
-							classNames = append(classNames, mapping[value])
-							continue
+							variantClass = mapping[value]
 						}
 					}
 				}
-				classNames = append(classNames, mapping[options.DefaultVariants[variant]])
 			case reflect.Struct:
-				f := p.FieldByName(variant)
+				f := pv.FieldByName(variant)
 				if f.IsValid() {
 					value, ok := f.Interface().(any)
 					if ok {
-						classNames = append(classNames, mapping[value])
-						continue
+						variantClass = mapping[value]
 					}
 				}
-				classNames = append(classNames, mapping[options.DefaultVariants[variant]])
-			default:
-				classNames = append(classNames, mapping[options.DefaultVariants[variant]])
 			}
+			classNames = append(classNames, variantClass)
 		}
 
 		for match, className := range options.CompoundVariants {
@@ -61,13 +58,13 @@ func New[T comparable](base string, options Options[T]) func(T) string {
 				switch mv.Kind() {
 				case reflect.Map:
 					for _, key := range mv.MapKeys() {
-						if mv.MapIndex(key).Interface() != p.MapIndex(key).Interface() {
+						if mv.MapIndex(key).Interface() != pv.MapIndex(key).Interface() {
 							continue
 						}
 					}
 				case reflect.Struct:
 					for i := 0; i < mv.NumField(); i++ {
-						if mv.Field(i).Interface() != p.Field(i).Interface() {
+						if mv.Field(i).Interface() != pv.Field(i).Interface() {
 							continue
 						}
 					}
